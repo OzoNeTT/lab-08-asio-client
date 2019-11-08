@@ -1,55 +1,37 @@
+#include <iostream>
 #include <boost/thread.hpp>
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
+#include <vector>
 #include <boost/shared_ptr.hpp>
-#include <boost/enable_shared_from_this.hpp>
 using namespace boost::asio;
 io_service service;
 
-/** simple connection to server:
-    - logs in just with username (no password)
-    - all connections are initiated by the client: client asks, server answers
-    - server disconnects any client that hasn't pinged for 5 seconds
-    Possible requests:
-    - gets a list of all connected clients
-    - ping: the server answers either with "ping ok" or "ping client_list_changed"
-*/
 struct talk_to_svr {
-    talk_to_svr(const std::string & username)
-            : sock_(service), started_(true), username_(username) {}
-    void connect(ip::tcp::endpoint ep) {
-        sock_.connect(ep);
-    }
-    void loop() {
-        // read answer to our login
-        write("login " + username_ + "\n");
-        read_answer();
-        while ( started_) {
-            write_request();
-            read_answer();
-            int millis = rand() % 7000;
-            std::cout << username_ << " postpone ping "
-                      << millis << " ms" << std::endl;
-            boost::this_thread::sleep(boost::posix_time::millisec(millis));
-        }
-    }
-    std::string username() const { return username_; }
 private:
+    ip::tcp::socket sock_;
+    enum { max_msg = 1024 };
+    int already_read_;
+    char buff_[max_msg];
+    bool started_;
+    std::string username_;
+
     void write_request() {
         write("ping\n");
     }
     void read_answer() {
         already_read_ = 0;
-        read(sock_, buffer(buff_),
-             boost::bind(&talk_to_svr::read_complete, this, _1, _2));
+        read(sock_, buffer(buff_), boost::bind(&talk_to_svr::read_complete, this, _1, _2));
         process_msg();
     }
     void process_msg() {
         std::string msg(buff_, already_read_);
-        if ( msg.find("login ") == 0) on_login();
-        else if ( msg.find("ping") == 0) on_ping(msg);
-        else if ( msg.find("clients ") == 0) on_clients(msg);
-        else std::cerr << "invalid msg " << msg << std::endl;
+        if ( msg.find("login ") == 0)
+            on_login();
+        else if ( msg.find("ping") == 0)
+            on_ping(msg);
+        else if ( msg.find("clients ") == 0)
+            on_clients(msg);
     }
 
     void on_login() {
@@ -68,7 +50,7 @@ private:
         std::cout << username_ << ", new client list:" << clients;
     }
     void do_ask_clients() {
-        write("ask_clients\n");
+        write("clients\n");
         read_answer();
     }
 
@@ -79,17 +61,27 @@ private:
         if ( err) return 0;
         already_read_ = bytes;
         bool found = std::find(buff_, buff_ + bytes, '\n') < buff_ + bytes;
-        // we read one-by-one until we get to enter, no buffering
         return found ? 0 : 1;
     }
-
-private:
-    ip::tcp::socket sock_;
-    enum { max_msg = 1024 };
-    int already_read_;
-    char buff_[max_msg];
-    bool started_;
-    std::string username_;
+public:
+    talk_to_svr(const std::string & username) : sock_(service), started_(true), username_(username) {}
+    void connect(ip::tcp::endpoint ep) {
+        sock_.connect(ep);
+    }
+    void loop() {
+        write("login " + username_ + "\n");
+        read_answer();
+        while ( started_) {
+            write_request();
+            read_answer();
+            int millis = rand() % 7000;
+            std::cout << username_ << " postpone ping " << millis << " ms" << std::endl;
+            boost::this_thread::sleep(boost::posix_time::millisec(millis));
+        }
+    }
+    std::string username() const {
+        return username_;
+    }
 };
 
 ip::tcp::endpoint ep( ip::address::from_string("127.0.0.1"), 8001);
@@ -99,17 +91,19 @@ void run_client(const std::string & client_name) {
         client.connect(ep);
         client.loop();
     } catch(boost::system::system_error & err) {
-        std::cout << "client terminated " << client.username()
-                  << ": " << err.what() << std::endl;
+        std::cout << "client terminated " << client.username() << std::endl;
     }
 }
 
 int main() {
-    boost::thread_group threads;
-    char* names[] = { (char*) "John", (char*) "James", (char*) "Lucy", (char*) "Tracy", (char*) "Frank", (char*) "Abby", 0 };
-    for ( char ** name = names; *name; ++name) {
-        threads.create_thread( boost::bind(run_client, *name));
+    std::string names[6] = { "John", "James", "Lucy", "Tracy", "Frank", "Abby"};
+    std::vector<boost::thread> threads;
+    threads.reserve(6);
+    for ( size_t i = 0; i < 6 ; i++) {
+        threads.emplace_back(run_client, names[i]);
         boost::this_thread::sleep( boost::posix_time::millisec(100));
     }
-    threads.join_all();
+    for(boost::thread &thread : threads){
+        thread.join();
+    }
 }

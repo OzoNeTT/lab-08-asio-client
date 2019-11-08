@@ -35,10 +35,10 @@ hunter_add_package(Boost COMPONENTS log thread filesystem system)
 find_package(Boost CONFIG REQUIRED log log_setup thread filesystem system)
 
 add_library(server STATIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/sources/Source.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/sources/source.cpp
         )
 add_executable(main
-        ${CMAKE_CURRENT_SOURCE_DIR}/sources/Source.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/sources/source.cpp
         )
 
 target_link_libraries(main
